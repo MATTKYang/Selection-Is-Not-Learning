@@ -1,0 +1,1272 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Selection Is Not Learning</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<meta name="description" content="EvoHeir and HeirCommit: self-evolving language models that judge the model each round produces, and keep useful experience even when that model is rejected.">
+<meta property="og:title" content="Selection Is Not Learning: Choosing Model Futures">
+<meta property="og:description" content="HeirCommit inherits an update only when it beats the current model on fresh probes. EvoHeir keeps experience even from rejected rounds. +5.3% math average over Agent0 across four backbones.">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M6 16h8l6-8M14 16l6 8' stroke='%235B4BD6' stroke-width='2.4' fill='none' stroke-linecap='round'/%3E%3Ccircle cx='6' cy='16' r='3.4' fill='%235B4BD6'/%3E%3Ccircle cx='21' cy='7.5' r='3' fill='%235B4BD6'/%3E%3Ccircle cx='21' cy='24.5' r='3' fill='none' stroke='%23A87D0A' stroke-width='2'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400..600;1,6..72,400..500&family=Schibsted+Grotesk:ital,wght@0,400..700;1,400&display=swap">
+<style>
+/* Layout: a lineage drawn across the top, then one reading column (64ch) with figures breaking out to 1120px. */
+:root {
+  --bg: #F6F6F9;
+  --surface: #FFFFFF;
+  --ink: #1C1A2B;
+  --ink-2: #4F4C63;
+  --muted: #76738A;
+  --rule: #E2E0EA;
+  --rule-2: #EEEDF3;
+  --accent: #5B4BD6;        /* EvoHeir, committed state */
+  --accent-soft: #EAE7FB;
+  --accent-mid: #A79DF0;    /* EvoHeir without Recovery */
+  --harm: #C2365F;          /* harmful update, rejected proposal */
+  --harm-soft: #F9E6EC;
+  --archive: #A87D0A;       /* archived experience */
+  --archive-soft: #F7EED6;
+  --slate: #5E6B7E;         /* Agent0 */
+  --grey: #A2A9B4;          /* R-Zero */
+  --on-accent: #FFFFFF;
+  --shadow: 0 1px 2px rgba(28, 26, 43, .04), 0 8px 24px rgba(28, 26, 43, .05);
+
+  --font-display: "Newsreader", "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+  --font-body: "Schibsted Grotesk", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+
+  --step--1: .8125rem;
+  --step-0: 1.0625rem;
+  --step-1: 1.3rem;
+  --step-2: 1.75rem;
+  --step-3: 2.4rem;
+  --wide: 1120px;
+  --read: 66ch;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #100F17; --surface: #191823; --ink: #ECEAF4; --ink-2: #B9B6CB; --muted: #8E8BA2;
+    --rule: #2D2B3B; --rule-2: #22212E;
+    --accent: #8577F0; --accent-soft: #262043; --accent-mid: #574DA6;
+    --harm: #DB5F88; --harm-soft: #3A1D29; --archive: #B5851A; --archive-soft: #30270F;
+    --slate: #8D9AAE; --grey: #5D6673; --on-accent: #0E0D16;
+    --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 8px 24px rgba(0, 0, 0, .25);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #100F17; --surface: #191823; --ink: #ECEAF4; --ink-2: #B9B6CB; --muted: #8E8BA2;
+  --rule: #2D2B3B; --rule-2: #22212E;
+  --accent: #8577F0; --accent-soft: #262043; --accent-mid: #574DA6;
+  --harm: #DB5F88; --harm-soft: #3A1D29; --archive: #B5851A; --archive-soft: #30270F;
+  --slate: #8D9AAE; --grey: #5D6673; --on-accent: #0E0D16;
+  --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 8px 24px rgba(0, 0, 0, .25);
+  color-scheme: dark;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+html { scroll-behavior: smooth; scroll-padding-top: 72px; }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: var(--step-0);
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+body::before {
+  content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px);
+  z-index: 10; background: var(--bg);
+}
+img { max-width: 100%; }
+a { color: var(--accent); text-underline-offset: .18em; text-decoration-thickness: 1px; }
+a:hover { text-decoration-thickness: 2px; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 4px; }
+h1, h2, h3 { font-family: var(--font-display); font-weight: 500; text-wrap: balance; margin: 0; }
+p { margin: 0; }
+.num { font-variant-numeric: tabular-nums; }
+.sc { font-variant: small-caps; letter-spacing: .02em; }
+
+.wrap {
+  max-width: calc(var(--wide) + 2 * 32px);
+  margin: 0 auto;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+@media (min-width: 720px) {
+  .wrap { padding-left: max(32px, env(safe-area-inset-left, 0px)); padding-right: max(32px, env(safe-area-inset-right, 0px)); }
+}
+
+/* Top bar */
+.bar {
+  position: sticky; top: env(safe-area-inset-top, 0px); z-index: 20;
+  background: color-mix(in oklab, var(--bg) 88%, transparent);
+  backdrop-filter: saturate(1.4) blur(10px);
+  -webkit-backdrop-filter: saturate(1.4) blur(10px);
+  border-bottom: 1px solid var(--rule);
+}
+.bar .wrap { display: flex; align-items: center; gap: 24px; height: 56px; }
+.brand { font-family: var(--font-display); font-size: 1.25rem; font-weight: 600; color: var(--ink); text-decoration: none; white-space: nowrap; }
+.brand .sc { font-weight: 500; }
+.bar nav { display: flex; gap: 4px; overflow-x: auto; scrollbar-width: none; min-width: 0; margin-left: auto; }
+.bar nav::-webkit-scrollbar { display: none; }
+.bar nav a {
+  color: var(--ink-2); text-decoration: none; font-size: .9rem; padding: 6px 10px; border-radius: 6px; white-space: nowrap;
+}
+.bar nav a:hover { color: var(--ink); background: var(--rule-2); }
+
+/* Hero */
+.hero { padding-block: 64px 24px; text-align: center; }
+.hero h1 {
+  font-size: clamp(2.3rem, 6.3vw, 5.3rem);
+  line-height: .98;
+  letter-spacing: -.025em;
+  font-weight: 500;
+  font-variation-settings: "opsz" 72;
+  margin-inline: auto;
+}
+.hero h1 .sub {
+  display: block;
+  font-style: italic;
+  font-weight: 400;
+  color: var(--ink-2);
+  font-size: .62em;
+  letter-spacing: -.015em;
+  margin-top: .22em;
+}
+.byline { margin-top: 36px; display: grid; gap: 6px; }
+.authors { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 22px; font-size: 1.08rem; font-weight: 500; }
+.authors span { white-space: nowrap; }
+.authors sup { color: var(--accent); font-weight: 600; margin-left: 1px; font-size: .7em; line-height: 0; vertical-align: baseline; position: relative; top: -.55em; }
+.affil { color: var(--ink-2); font-size: .95rem; }
+.affil small { color: var(--muted); font-size: .85rem; margin-left: 10px; }
+.links { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; margin-top: 28px; }
+.btn {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 9px 16px 9px 13px; border-radius: 999px;
+  font: 500 .95rem/1 var(--font-body);
+  color: var(--ink); background: var(--surface); border: 1px solid var(--rule);
+  text-decoration: none; cursor: pointer;
+  transition: border-color .15s, background-color .15s;
+}
+.btn:hover { border-color: var(--accent); text-decoration: none; }
+.btn svg { width: 17px; height: 17px; flex: none; }
+.btn.primary { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+.btn.primary:hover { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.btn[aria-disabled="true"] { color: var(--muted); cursor: default; border-style: dashed; }
+.btn[aria-disabled="true"]:hover { border-color: var(--rule); }
+.btn .soon { font-size: .78rem; color: var(--muted); font-weight: 400; }
+
+/* Lineage band */
+.lineage { margin-top: 48px; }
+.lineage-frame {
+  background: var(--surface); border: 1px solid var(--rule); border-radius: 16px; box-shadow: var(--shadow);
+  padding: 20px 20px 14px;
+}
+.lineage svg { display: block; width: 100%; height: auto; }
+.legend { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px 20px; font-size: .86rem; color: var(--ink-2); margin-top: 10px; }
+.legend span { display: inline-flex; align-items: center; gap: 7px; }
+.legend i { display: inline-block; flex: none; }
+.key-dot { width: 11px; height: 11px; border-radius: 50%; background: var(--accent); }
+.key-ring { width: 11px; height: 11px; border-radius: 50%; border: 2px solid var(--ink-2); }
+.key-x { width: 11px; height: 11px; position: relative; }
+.key-x::before, .key-x::after { content: ""; position: absolute; left: 5px; top: -1px; width: 2px; height: 13px; background: var(--harm); border-radius: 1px; transform: rotate(45deg); }
+.key-x::after { transform: rotate(-45deg); }
+.key-dash { width: 22px; height: 0; border-top: 2px dashed var(--archive); }
+.key-line { width: 22px; height: 3px; border-radius: 2px; background: var(--accent); }
+.caption { color: var(--muted); font-size: .875rem; line-height: 1.5; margin: 12px auto 0; max-width: 90ch; text-align: center; }
+
+/* Sections */
+section { padding-block: 72px 8px; }
+.sec-head { max-width: var(--read); display: grid; gap: 14px; margin-inline: auto; text-align: center; }
+.sec-head h2 { font-size: clamp(1.9rem, 3.6vw, var(--step-3)); line-height: 1.08; letter-spacing: -.015em; }
+.sec-head p { color: var(--ink-2); font-size: 1.08rem; }
+.prose { max-width: var(--read); color: var(--ink-2); display: grid; gap: 14px; margin-top: 18px; }
+.prose strong { color: var(--ink); font-weight: 600; }
+
+.brief {
+  font-family: var(--font-display);
+  font-size: clamp(1.3rem, 2.3vw, 1.6rem);
+  line-height: 1.42;
+  max-width: 34em;
+  margin-inline: auto;
+  text-align: center;
+  color: var(--ink);
+  font-variation-settings: "opsz" 28;
+}
+.brief em { font-style: italic; }
+.findings {
+  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin-top: 40px; border-top: 1px solid var(--rule);
+}
+.findings > div { padding: 18px 20px 4px 0; display: grid; gap: 4px; align-content: start; }
+.findings > div + div { padding-left: 20px; border-left: 1px solid var(--rule); }
+.findings b {
+  font-family: var(--font-display); font-weight: 500; font-size: 2.5rem; line-height: 1;
+  letter-spacing: -.02em; color: var(--accent); font-variant-numeric: lining-nums;
+}
+.findings b.harm { color: var(--harm); }
+.findings span { color: var(--ink-2); font-size: .93rem; line-height: 1.45; }
+@media (max-width: 860px) {
+  .findings { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .findings > div:nth-child(3) { padding-left: 0; border-left: 0; }
+  .findings > div:nth-child(n+3) { border-top: 1px solid var(--rule); }
+}
+@media (max-width: 440px) {
+  .findings { grid-template-columns: minmax(0, 1fr); }
+  .findings > div + div { padding-left: 0; border-left: 0; border-top: 1px solid var(--rule); }
+}
+
+/* Figures */
+.fig { margin: 32px 0 0; }
+.panel {
+  background: var(--surface); border: 1px solid var(--rule); border-radius: 14px;
+  padding: 20px; min-width: 0;
+}
+.panel h3 { font-family: var(--font-body); font-size: .98rem; font-weight: 600; letter-spacing: 0; }
+.panel .sub3 { color: var(--muted); font-size: .85rem; margin-top: 2px; }
+.panel svg { display: block; width: 100%; height: auto; margin-top: 10px; overflow: visible; }
+.grid-2 { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr); gap: 16px; }
+.grid-2.even { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+@media (max-width: 860px) { .grid-2, .grid-2.even { grid-template-columns: minmax(0, 1fr); } }
+.fig figcaption { color: var(--muted); font-size: .875rem; line-height: 1.5; margin: 12px auto 0; max-width: 92ch; text-align: center; }
+.scroll-x { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.panel-head { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 10px 16px; }
+
+/* Segmented control */
+.seg { display: inline-flex; padding: 3px; border-radius: 9px; background: var(--rule-2); border: 1px solid var(--rule); }
+.seg button {
+  font: 500 .85rem/1 var(--font-body); color: var(--ink-2);
+  border: 0; background: transparent; padding: 7px 12px; border-radius: 6px; cursor: pointer;
+}
+.seg button[aria-pressed="true"] { background: var(--surface); color: var(--ink); box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+
+/* SVG chart vocabulary (colors come from tokens) */
+.ax { stroke: var(--rule); stroke-width: 1; }
+.ax-0 { stroke: var(--muted); stroke-width: 1; }
+.grid-l { stroke: var(--rule-2); stroke-width: 1; }
+.t-tick { fill: var(--muted); font: 400 11.5px var(--font-body); }
+.t-lab { fill: var(--ink-2); font: 500 12.5px var(--font-body); }
+.t-val { fill: var(--ink); font: 600 12px var(--font-body); }
+.t-note { fill: var(--muted); font: 400 12px var(--font-body); }
+.t-acc { fill: var(--accent); }
+.t-harm { fill: var(--harm); }
+.t-arch { fill: var(--archive); }
+.t-ink { fill: var(--ink); }
+.f-accent { fill: var(--accent); } .f-accent-mid { fill: var(--accent-mid); } .f-harm { fill: var(--harm); }
+.f-slate { fill: var(--slate); } .f-grey { fill: var(--grey); } .f-archive { fill: var(--archive); }
+.f-surface { fill: var(--surface); } .f-ink { fill: var(--ink); } .f-ink2 { fill: var(--ink-2); }
+.f-accent-soft { fill: var(--accent-soft); } .f-harm-soft { fill: var(--harm-soft); } .f-archive-soft { fill: var(--archive-soft); }
+.s-accent { stroke: var(--accent); } .s-accent-mid { stroke: var(--accent-mid); } .s-slate { stroke: var(--slate); }
+.s-grey { stroke: var(--grey); } .s-harm { stroke: var(--harm); } .s-archive { stroke: var(--archive); } .s-ink { stroke: var(--ink); }
+.s-ink2 { stroke: var(--ink-2); } .s-rule { stroke: var(--rule); } .s-surface { stroke: var(--surface); }
+.line { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.band { opacity: .14; }
+.hit { fill: transparent; cursor: crosshair; }
+.bar-hover:hover { opacity: .78; }
+
+/* Tooltip */
+.tip {
+  position: fixed; z-index: 50; pointer-events: none;
+  background: var(--ink); color: var(--bg);
+  font: 400 .82rem/1.45 var(--font-body);
+  padding: 8px 11px; border-radius: 8px; max-width: 260px;
+  box-shadow: 0 6px 20px rgba(0,0,0,.18);
+}
+.tip b { font-weight: 600; }
+.tip .row { display: flex; align-items: center; gap: 7px; white-space: nowrap; }
+.tip .row span:last-child { margin-left: auto; padding-left: 14px; }
+.sw { display: inline-block; width: 9px; height: 9px; border-radius: 2px; flex: none; }
+.sw-accent { background: var(--accent); } .sw-accent-mid { background: var(--accent-mid); }
+.sw-slate { background: var(--slate); } .sw-grey { background: var(--grey); } .sw-harm { background: var(--harm); }
+
+/* Method */
+.method-svg { min-width: 820px; }
+.m-step { fill: var(--accent); }
+.m-stepn { fill: var(--on-accent); font: 700 13px var(--font-body); }
+.m-title { fill: var(--ink); font: 600 16px var(--font-body); }
+.m-lab { fill: var(--ink); font: 500 13.5px var(--font-body); }
+.m-note { fill: var(--muted); font: italic 400 12.5px var(--font-body); }
+.m-sep { stroke: var(--rule); stroke-width: 1; }
+.m-flow { fill: none; stroke: var(--ink-2); stroke-width: 1.6; }
+.m-flow-acc { fill: none; stroke: var(--accent); stroke-width: 2; }
+.m-flow-arch { fill: none; stroke: var(--archive); stroke-width: 1.6; stroke-dasharray: 5 4; }
+.m-node { fill: var(--surface); stroke: var(--ink-2); stroke-width: 1.6; }
+.m-node-acc { fill: var(--accent); }
+.m-ring { fill: none; stroke: var(--accent); stroke-width: 2; }
+.m-box { stroke: var(--rule); fill: var(--surface); stroke-width: 1.2; }
+.m-head { fill: var(--rule-2); }
+.steps { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0; margin-top: 18px; border-top: 1px solid var(--rule); }
+.steps > div { padding: 16px 18px 0 0; display: grid; gap: 6px; align-content: start; min-width: 0; }
+.steps > div + div { padding-left: 18px; border-left: 1px solid var(--rule); }
+.steps h3 { font-family: var(--font-body); font-size: 1rem; font-weight: 600; display: flex; align-items: center; gap: 9px; }
+.steps h3 .n {
+  display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%;
+  background: var(--accent); color: var(--on-accent); font-size: .78rem; font-weight: 700;
+}
+.steps p { color: var(--ink-2); font-size: .93rem; line-height: 1.5; }
+@media (max-width: 860px) {
+  .steps { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .steps > div:nth-child(3) { padding-left: 0; border-left: 0; }
+  .steps > div:nth-child(n+3) { margin-top: 14px; }
+}
+@media (max-width: 480px) {
+  .steps { grid-template-columns: minmax(0, 1fr); }
+  .steps > div + div { padding-left: 0; border-left: 0; margin-top: 14px; }
+}
+.eq { margin: 28px auto 0; max-width: 820px; text-align: center; }
+.eq math { font-size: 1.4rem; font-family: var(--font-display); color: var(--ink); overflow-x: auto; max-width: 100%; padding-block: 6px; }
+.eq figcaption { color: var(--muted); font-size: .875rem; line-height: 1.5; margin-top: 10px; }
+.eq figcaption i { font-family: var(--font-display); font-size: 1.05em; }
+.eq mtext { font-family: var(--font-display); font-style: normal; }
+.eq mi { font-family: var(--font-display); font-style: italic; }
+.eq mo { font-family: var(--font-display); }
+
+/* Tables */
+.tbl-wrap { overflow-x: auto; margin-top: 12px; }
+table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+.results th, .results td { padding: 11px 12px; text-align: right; white-space: nowrap; border-bottom: 1px solid var(--rule-2); }
+.results th { font: 500 .82rem var(--font-body); color: var(--muted); border-bottom: 1px solid var(--rule); vertical-align: bottom; }
+.results th:first-child, .results td:first-child { text-align: left; }
+.results td { font-size: .98rem; }
+.results td:first-child { font-weight: 500; }
+.results .pm { color: var(--muted); font-size: .78rem; margin-left: 3px; }
+.results .ours { background: var(--accent-soft); color: var(--ink); font-weight: 600; }
+.results th.ours { color: var(--accent); font-weight: 600; border-radius: 8px 8px 0 0; }
+.results tr:last-child td.ours { border-radius: 0 0 8px 8px; }
+.results .gain { color: var(--accent); font-weight: 600; }
+.results .gain small { color: var(--muted); font-weight: 400; margin-left: 4px; }
+.results tbody tr:last-child td { border-bottom: 0; }
+
+/* Heatmap */
+.heat { border-collapse: separate; border-spacing: 3px; min-width: 760px; }
+.heat th { font: 500 .74rem/1.2 var(--font-body); color: var(--muted); padding: 4px 2px 6px; text-align: center; vertical-align: bottom; }
+.heat th.grp { font-size: .82rem; color: var(--ink-2); padding-bottom: 2px; text-align: left; border-bottom: 1px solid var(--rule); }
+.heat th.row { text-align: right; padding-right: 10px; white-space: nowrap; color: var(--ink-2); font-size: .82rem; vertical-align: middle; }
+.heat td {
+  text-align: center; font-size: .8rem; font-weight: 500; padding: 9px 2px; border-radius: 5px;
+  font-variant-numeric: tabular-nums; cursor: default; transition: transform .12s;
+}
+.heat td:hover { outline: 2px solid var(--ink); outline-offset: -1px; }
+.heat td.avg { font-weight: 700; }
+.heat .gap { width: 10px; padding: 0; }
+.scale { display: flex; align-items: center; gap: 10px; font-size: .8rem; color: var(--muted); margin-top: 12px; flex-wrap: wrap; }
+.scale .ramp { width: 180px; max-width: 50vw; height: 10px; border-radius: 3px; background: linear-gradient(90deg, var(--harm), var(--surface) 15%, var(--accent)); border: 1px solid var(--rule); }
+
+/* Trajectories */
+.traj-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-top: 16px; }
+@media (max-width: 1060px) { .traj-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 520px) { .traj-grid { grid-template-columns: minmax(0, 1fr); } }
+.traj-grid .panel { padding: 16px 14px 10px; }
+.traj-grid .lead { color: var(--accent); font-weight: 600; font-size: .85rem; }
+.series-key { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: .86rem; color: var(--ink-2); }
+.series-key span { display: inline-flex; align-items: center; gap: 7px; }
+.series-key i { width: 20px; height: 0; border-top: 2.5px solid; display: inline-block; }
+.k-accent { border-color: var(--accent) !important; } .k-accent-mid { border-color: var(--accent-mid) !important; }
+.k-slate { border-color: var(--slate) !important; } .k-grey { border-color: var(--grey) !important; border-top-style: dashed !important; }
+
+/* Every update, one dot */
+.dots-rows { display: grid; gap: 18px; margin-top: 18px; }
+.dots-row { display: grid; grid-template-columns: 96px minmax(0, 560px) minmax(0, 1fr); gap: 20px 32px; align-items: center; }
+.dots-row h4 { margin: 0; font: 600 1rem var(--font-body); }
+.dots-row svg { display: block; width: 100%; max-width: 560px; height: auto; }
+.dots-stat { display: grid; gap: 2px; font-size: .9rem; color: var(--ink-2); }
+.dots-stat b { font-family: var(--font-display); font-weight: 500; font-size: 1.7rem; line-height: 1.1; color: var(--harm); transition: color .3s; }
+.dots-stat b.good { color: var(--accent); }
+@media (max-width: 760px) {
+  .dots-row { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+}
+.dot { stroke-width: 1.6; transition: transform .8s cubic-bezier(.3, .7, .2, 1), fill-opacity .45s, stroke-opacity .45s; }
+.dot.help { fill: var(--accent); stroke: var(--accent); }
+.dot.hurt { fill: var(--harm); stroke: var(--harm); }
+.dot.off { fill-opacity: 0; stroke-opacity: .5; }
+@media (prefers-reduced-motion: reduce) { .dot { transition: none; } }
+.dots-key { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: .86rem; color: var(--ink-2); }
+.dots-key span { display: inline-flex; align-items: center; gap: 7px; }
+.dots-key i { width: 11px; height: 11px; border-radius: 50%; display: inline-block; }
+.dots-key .h { background: var(--accent); } .dots-key .x { background: var(--harm); }
+.dots-key .o { border: 1.6px solid var(--muted); }
+
+/* BibTeX */
+.bib { position: relative; margin: 20px auto 0; max-width: 760px; }
+.bib pre {
+  margin: 0; padding: 20px 22px; border-radius: 12px; background: var(--surface); border: 1px solid var(--rule);
+  font: 400 .86rem/1.65 ui-monospace, "SF Mono", Menlo, Consolas, monospace; color: var(--ink-2);
+  overflow-x: auto;
+}
+.bib button { position: absolute; top: 12px; right: 12px; }
+
+footer { padding-block: 72px 48px; color: var(--muted); font-size: .86rem; }
+footer .wrap { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px; border-top: 1px solid var(--rule); padding-top: 20px; }
+
+/* Hero lineage drawing */
+.ln-branch { fill: none; stroke: var(--ink-2); stroke-width: 1.3; opacity: .55; }
+.ln-commit { fill: none; stroke: var(--accent); stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+.ln-retain { fill: none; stroke: var(--ink-2); stroke-width: 2; stroke-dasharray: 2 5; stroke-linecap: round; }
+.ln-recv { fill: none; stroke: var(--accent); stroke-width: 1.6; opacity: .7; }
+.ln-arch { fill: none; stroke: var(--archive); stroke-width: 1.4; stroke-dasharray: 3 4; animation: drift 2.8s linear infinite; }
+.ln-rail { stroke: var(--archive); stroke-width: 2.5; stroke-linecap: round; }
+.ln-pulse { fill: none; stroke: var(--accent); stroke-width: 7; stroke-linecap: round; opacity: 0; }
+.nd-branch { fill: var(--surface); stroke: var(--ink-2); stroke-width: 1.5; }
+.nd-pick { fill: none; stroke: var(--accent); stroke-width: 2; }
+.nd-commit { fill: var(--accent); stroke: var(--surface); stroke-width: 2.5; }
+.nd-keep { fill: var(--surface); stroke: var(--ink-2); stroke-width: 2.2; }
+.nd-prop { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 1.6; }
+.nd-rej { fill: var(--harm-soft); stroke: var(--harm); stroke-width: 1.4; }
+.x-rej { stroke: var(--harm); stroke-width: 1.8; stroke-linecap: round; }
+.nd-arch { fill: var(--archive); }
+@keyframes drift { to { stroke-dashoffset: -14; } }
+@keyframes pulse {
+  0% { stroke-dashoffset: var(--len); opacity: 0; }
+  6% { opacity: .35; }
+  90% { opacity: .35; }
+  100% { stroke-dashoffset: 0; opacity: 0; }
+}
+.ln-pulse.run { animation: pulse 4.2s cubic-bezier(.45,.05,.35,1) .5s 1 both; }
+@media (prefers-reduced-motion: reduce) {
+  .ln-arch { animation: none; }
+  .ln-pulse.run { animation: none; }
+}
+</style>
+</head>
+<body>
+
+<header class="bar">
+  <div class="wrap">
+    <a class="brand" href="#top"><span class="sc">EvoHeir</span></a>
+    <nav aria-label="Sections">
+      <a href="#gap">The gap</a>
+      <a href="#method">Method</a>
+      <a href="#heircommit">HeirCommit</a>
+      <a href="#results">Results</a>
+      <a href="#bibtex">BibTeX</a>
+    </nav>
+  </div>
+</header>
+
+<main id="top">
+  <div class="wrap">
+    <div class="hero">
+      <h1>Selection Is Not Learning<span class="sub">Choosing Model Futures</span></h1>
+
+      <div class="byline">
+        <div class="authors">
+          <span>Haoyi Yang<sup>*</sup></span>
+          <span>Kshitij Mishra<sup>*</sup></span>
+          <span>Nils Lukas</span>
+          <span>Salem Lahlou</span>
+        </div>
+        <div class="affil">Mohamed bin Zayed University of Artificial Intelligence, Abu Dhabi<small>* Equal contribution</small></div>
+      </div>
+
+      <div class="links">
+        <a class="btn primary" href="https://arxiv.org/abs/2610.22029" target="_blank" rel="noopener">
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M5 2.5h7l3.5 3.5v11.5H5z"/><path d="M12 2.5V6h3.5M7.5 10h5M7.5 13h5"/></svg>
+          Paper
+        </a>
+        <a class="btn" href="https://arxiv.org/pdf/2610.22029" target="_blank" rel="noopener">
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M10 3v10M6 9.5l4 4 4-4M4 16.5h12"/></svg>
+          PDF
+        </a>
+        <!-- TODO: replace with the code repository URL and remove aria-disabled once it is public. -->
+        <a class="btn" aria-disabled="true" title="Code release coming soon">
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M7 6l-4 4 4 4M13 6l4 4-4 4"/></svg>
+          Code <span class="soon">soon</span>
+        </a>
+        <a class="btn" href="#bibtex">
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M6 6.5H4.5v4h3v-4M6 10.5c0 2-1 3-2.5 3.5M14 6.5h-1.5v4h3v-4M14 10.5c0 2-1 3-2.5 3.5"/></svg>
+          BibTeX
+        </a>
+      </div>
+    </div>
+
+    <figure class="lineage" aria-labelledby="lineage-cap">
+      <div class="lineage-frame">
+        <svg id="lineage" viewBox="0 0 1000 276" role="img" aria-label="An illustrative ten-round lineage. Each round explores two branches and screens a recipient. The proposal is committed only when it beats the current model on fresh probes; otherwise the current model carries on. Experience from every branch flows into an archive that later rounds draw from."></svg>
+        <div class="legend" aria-hidden="true">
+          <span><i class="key-line"></i>inherited lineage</span>
+          <span><i class="key-dot"></i>proposal committed</span>
+          <span><i class="key-ring"></i>root retained</span>
+          <span><i class="key-x"></i>proposal rejected</span>
+          <span><i class="key-dash"></i>experience archived and reused</span>
+        </div>
+      </div>
+      <figcaption id="lineage-cap" class="caption">An illustrative ten-round lineage, not measured data. Each round explores two branches, screens one as the recipient, recovers experience into it, and keeps the result only if it beats the current model on fresh probes. Rejected rounds still leave their experience in the archive.</figcaption>
+    </figure>
+
+    <!-- In brief -->
+    <section id="brief" aria-label="Summary">
+      <p class="brief">Self-evolving language models train on tasks they write for themselves, and every round must decide which updated model the next round inherits. Current loops decide by choosing tasks that look learnable, then inherit every update. We find that most of those updates do not help. <em>HeirCommit</em> judges the updated model itself on fresh questions. <em>EvoHeir</em> goes further and lets experience survive even when the model that produced it is rejected.</p>
+      <div class="findings">
+        <div><b class="harm num">60 / 96</b><span>Skill Self-Play updates on verified tasks that do not make correct answers more likely</span></div>
+        <div><b class="num">68–83%</b><span>fewer harmful commits with HeirCommit than random inheritance at the same rate</span></div>
+        <div><b class="num">+5.3%</b><span>relative math average over Agent0, the strongest baseline, across four backbones</span></div>
+        <div><b class="num">45 / 48</b><span>benchmark–backbone pairs where EvoHeir beats Agent0 after ten rounds</span></div>
+      </div>
+    </section>
+
+    <!-- The gap -->
+    <section id="gap">
+      <div class="sec-head">
+        <h2>Task selection does not predict learning</h2>
+        <p>Pass rate, disagreement, and frontier proximity describe the model before training. They say little about what an optimizer update will do to it. We call the mismatch the selection-to-update gap.</p>
+      </div>
+      <div class="fig">
+        <div class="grid-2">
+          <div class="panel">
+            <h3>Most updates on verified tasks do not help</h3>
+            <p class="sub3">Correct-target NLL gain of 96 real Skill-SP updates on exact-valid tasks, sorted</p>
+            <svg id="chart-nll" viewBox="0 0 640 250" role="img" aria-label="Bar chart of 96 updates sorted by NLL gain. 60 are at or below zero; 36 are positive."></svg>
+          </div>
+          <div class="panel">
+            <h3>Selected tasks look easier than they are</h3>
+            <p class="sub3">Support a target shows on the responses that selected it, minus its support on fresh responses (pp)</p>
+            <svg id="chart-opt" viewBox="0 0 400 250" role="img" aria-label="Selected-target optimism: 8.60 pp for Agent0 and 4.10 pp for R-Zero, against fixed-target controls of 0.20 and minus 0.10."></svg>
+          </div>
+        </div>
+        <figcaption>Under fresh responses, 52% of Agent0's and 42% of R-Zero's admitted tasks also fall off the native frontier. Whiskers show the reported interval for each estimate.</figcaption>
+      </div>
+    </section>
+
+    <!-- Method -->
+    <section id="method">
+      <div class="sec-head">
+        <h2>One EvoHeir round</h2>
+        <p>EvoHeir gives exploration two routes into the next learner: the parameters it selects and the experience it absorbs. A useful experience donor no longer has to supply the next model's weights.</p>
+      </div>
+      <div class="fig">
+        <div class="panel scroll-x">
+          <svg class="method-svg" viewBox="0 0 1120 440" role="img" aria-label="Four steps. Explore: the root trains two native branches. Screen: paired gains pick a recipient, with ties going to the root. Recover: the recipient attempts current and archived problems without references; failures go to a repair set and successes to a keep set; a frozen copy teaches a LoRA student. Confirm: the frozen proposal and the root are scored on fresh probes, and the proposal is committed only if its paired gain is positive. An archive below keeps qualified responses from every branch.">
+            <defs>
+              <marker id="ah-ink" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="f-ink2"/></marker>
+              <marker id="ah-acc" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="f-accent"/></marker>
+              <marker id="ah-arch" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="f-archive"/></marker>
+            </defs>
+            <line class="m-sep" x1="258" y1="22" x2="258" y2="368"/>
+            <line class="m-sep" x1="492" y1="22" x2="492" y2="368"/>
+            <line class="m-sep" x1="868" y1="22" x2="868" y2="368"/>
+
+            <!-- 1 Explore -->
+            <circle class="m-step" cx="28" cy="36" r="13"/><text class="m-stepn" x="28" y="40.5" text-anchor="middle">1</text>
+            <text class="m-title" x="50" y="42">Explore</text>
+            <text class="m-note" x="129" y="70" text-anchor="middle">native training from the root</text>
+            <circle class="m-node-acc" cx="52" cy="200" r="20"/>
+            <text class="m-lab" x="52" y="244" text-anchor="middle">root S<tspan baseline-shift="sub" font-size="10">t</tspan></text>
+            <path class="m-flow" d="M74 190 L168 140" marker-end="url(#ah-ink)"/>
+            <path class="m-flow" d="M74 210 L168 260" marker-end="url(#ah-ink)"/>
+            <circle class="m-node" cx="190" cy="130" r="16"/>
+            <circle class="m-node" cx="190" cy="270" r="16"/>
+            <text class="m-lab" x="190" y="102" text-anchor="middle">branch 1</text>
+            <text class="m-lab" x="190" y="304" text-anchor="middle">branch 2</text>
+
+            <!-- 2 Screen -->
+            <circle class="m-step" cx="282" cy="36" r="13"/><text class="m-stepn" x="282" y="40.5" text-anchor="middle">2</text>
+            <text class="m-title" x="304" y="42">Screen</text>
+            <text class="m-note" x="375" y="110" text-anchor="middle">paired gain on screening probes</text>
+            <text class="m-lab" x="296" y="155" text-anchor="middle">root</text>
+            <rect class="f-grey" x="322" y="143" width="6" height="16" rx="3"/>
+            <text class="m-lab" x="296" y="205" text-anchor="middle">b1</text>
+            <rect class="f-grey" x="322" y="193" width="66" height="16" rx="3"/>
+            <text class="m-lab" x="296" y="255" text-anchor="middle">b2</text>
+            <rect class="f-accent" x="322" y="243" width="118" height="16" rx="3"/>
+            <rect class="m-ring" x="276" y="233" width="178" height="36" rx="10"/>
+            <text class="m-lab t-acc" x="365" y="298" text-anchor="middle" font-weight="600">recipient</text>
+            <text class="m-note" x="365" y="318" text-anchor="middle">ties go to the root</text>
+
+            <!-- 3 Recover -->
+            <circle class="m-step" cx="516" cy="36" r="13"/><text class="m-stepn" x="516" y="40.5" text-anchor="middle">3</text>
+            <text class="m-title" x="538" y="42">Recover experience</text>
+            <rect class="f-archive-soft s-archive" x="510" y="94" width="96" height="64" rx="8" stroke-width="1.4"/>
+            <text class="m-lab" x="558" y="119" text-anchor="middle">E<tspan baseline-shift="sub" font-size="10">t</tspan>, M<tspan baseline-shift="sub" font-size="10">t</tspan></text>
+            <text class="m-note" x="558" y="145" text-anchor="middle">references</text>
+            <path class="m-flow" d="M608 126 L640 126" marker-end="url(#ah-ink)"/>
+            <circle class="m-node" cx="664" cy="126" r="15"/>
+            <circle class="m-ring" cx="664" cy="126" r="21"/>
+            <text class="m-note" x="664" y="167" text-anchor="middle">attempts,</text>
+            <text class="m-note" x="664" y="183" text-anchor="middle">no reference</text>
+            <path class="m-flow" d="M688 116 L710 99" marker-end="url(#ah-ink)"/>
+            <path class="m-flow" d="M688 136 L710 153" marker-end="url(#ah-ink)"/>
+            <rect class="f-harm-soft s-harm" x="714" y="80" width="146" height="30" rx="7" stroke-width="1.4"/>
+            <text class="m-lab t-harm" x="787" y="100" text-anchor="middle">failed → repair set</text>
+            <rect class="f-accent-soft s-accent" x="714" y="141" width="146" height="30" rx="7" stroke-width="1.4"/>
+            <text class="m-lab t-acc" x="787" y="161" text-anchor="middle">solved → keep set</text>
+
+            <rect class="m-box" x="510" y="200" width="346" height="120" rx="8"/>
+            <path class="m-head" d="M511 236 V208 a7 7 0 0 1 7 -7 H848 a7 7 0 0 1 7 7 V236 Z"/>
+            <line class="s-rule" x1="510" y1="236" x2="856" y2="236"/>
+            <line class="s-rule" x1="510" y1="278" x2="856" y2="278"/>
+            <line class="s-rule" x1="590" y1="200" x2="590" y2="320"/>
+            <line class="s-rule" x1="724" y1="200" x2="724" y2="320"/>
+            <text class="m-lab" x="657" y="223" text-anchor="middle" font-weight="600">frozen teacher</text>
+            <text class="m-lab" x="790" y="223" text-anchor="middle" font-weight="600">LoRA student</text>
+            <text class="m-lab t-harm" x="550" y="262" text-anchor="middle">repair</text>
+            <text class="m-lab t-acc" x="550" y="304" text-anchor="middle">keep</text>
+            <text class="m-lab" x="657" y="262" text-anchor="middle">(x, <tspan class="t-arch" font-weight="700">r</tspan>, y<tspan baseline-shift="sub" font-size="10">&lt;j</tspan>)</text>
+            <text class="m-lab" x="790" y="262" text-anchor="middle">(x, y<tspan baseline-shift="sub" font-size="10">&lt;j</tspan>)</text>
+            <text class="m-lab" x="657" y="304" text-anchor="middle">(x, y<tspan baseline-shift="sub" font-size="10">&lt;j</tspan>)</text>
+            <text class="m-lab" x="790" y="304" text-anchor="middle">(x, y<tspan baseline-shift="sub" font-size="10">&lt;j</tspan>)</text>
+            <text class="m-note" x="683" y="343" text-anchor="middle">Both copies start from the recipient's weights;</text>
+            <text class="m-note" x="683" y="360" text-anchor="middle">the student matches the teacher token by token.</text>
+
+            <path class="m-flow-acc" d="M856 260 H876 V120 H886" marker-end="url(#ah-acc)"/>
+            <text class="m-lab t-acc" x="884" y="196" text-anchor="start" font-weight="600">S<tspan baseline-shift="super" font-size="10">+</tspan></text>
+
+            <!-- 4 Confirm -->
+            <circle class="m-step" cx="892" cy="36" r="13"/><text class="m-stepn" x="892" y="40.5" text-anchor="middle">4</text>
+            <text class="m-title" x="914" y="42">Confirm</text>
+            <circle class="m-node-acc" cx="912" cy="120" r="18"/>
+            <text class="m-lab t-acc" x="912" y="90" text-anchor="middle">frozen S<tspan baseline-shift="super" font-size="10">+</tspan></text>
+            <circle class="m-node" cx="912" cy="260" r="18"/>
+            <text class="m-lab" x="912" y="300" text-anchor="middle">root S<tspan baseline-shift="sub" font-size="10">t</tspan></text>
+            <path class="m-flow" d="M930 130 L960 170" marker-end="url(#ah-ink)"/>
+            <path class="m-flow" d="M930 250 L960 210" marker-end="url(#ah-ink)"/>
+            <rect class="m-box" x="964" y="164" width="54" height="52" rx="7"/>
+            <text class="m-note" x="991" y="186" text-anchor="middle" font-style="normal">fresh</text>
+            <text class="m-note" x="991" y="203" text-anchor="middle" font-style="normal">probes</text>
+            <path class="m-flow-acc" d="M1020 180 L1036 156" marker-end="url(#ah-acc)"/>
+            <path class="m-flow" d="M1020 200 L1036 224" marker-end="url(#ah-ink)"/>
+            <text class="m-lab t-acc" x="1040" y="150" font-weight="600">commit</text>
+            <text class="m-lab t-acc" x="1040" y="168">if v &gt; 0</text>
+            <text class="m-lab" x="1040" y="240">keep root</text>
+            <text class="m-note" x="994" y="340" text-anchor="middle">v: paired gain of S<tspan baseline-shift="super" font-size="9">+</tspan> over S<tspan baseline-shift="sub" font-size="9">t</tspan></text>
+
+            <!-- Archive -->
+            <path class="m-flow-arch" d="M190 314 V382" marker-end="url(#ah-arch)"/>
+            <path class="m-flow-arch" d="M498 384 V126 H506" marker-end="url(#ah-arch)"/>
+            <rect class="f-archive-soft s-archive" x="12" y="384" width="1096" height="44" rx="10" stroke-width="1.4"/>
+            <text class="m-lab t-arch" x="30" y="411" font-weight="600">Archive M<tspan baseline-shift="sub" font-size="10">t</tspan></text>
+            <text class="m-note" x="132" y="411" font-style="normal">keeps qualified responses from every branch whether or not the round commits, so a rejected round can still teach a later recipient.</text>
+          </svg>
+        </div>
+        <div class="steps">
+          <div><h3><span class="n">1</span>Explore</h3><p>Train native branches from the current model, the root, exactly as the host loop would.</p></div>
+          <div><h3><span class="n">2</span>Screen</h3><p>Freeze the candidates and score each against the root on shared screening probes. The best one becomes the recipient.</p></div>
+          <div><h3><span class="n">3</span>Recover</h3><p>The recipient attempts current and archived problems without references. A frozen copy repairs its failures with a donor's reference and preserves its successes.</p></div>
+          <div><h3><span class="n">4</span>Confirm</h3><p>HeirCommit scores the final proposal against the root on held-out probes and commits it only if it wins. Otherwise the root carries on.</p></div>
+        </div>
+        <figure class="eq">
+          <math display="block" aria-label="Recovery loss">
+            <mrow>
+              <msub><mi mathvariant="normal">ℒ</mi><mtext>rec</mtext></msub><mo stretchy="false">(</mo><mi mathvariant="normal">θ</mi><mo stretchy="false">)</mo>
+              <mo>=</mo>
+              <msub>
+                <mrow><mo fence="true">⟨</mo><mi mathvariant="normal">d</mi><mo stretchy="false">(</mo><msubsup><mi mathvariant="normal">T</mi><mi mathvariant="normal">j</mi><mtext>repair</mtext></msubsup><mo>,</mo><msub><mi mathvariant="normal">P</mi><mrow><mi mathvariant="normal">θ</mi><mo>,</mo><mi mathvariant="normal">j</mi></mrow></msub><mo stretchy="false">)</mo><mo fence="true">⟩</mo></mrow>
+                <msup><mi mathvariant="normal">D</mi><mtext>repair</mtext></msup>
+              </msub>
+              <mo>+</mo>
+              <msub><mi mathvariant="normal">λ</mi><mtext>keep</mtext></msub>
+              <msub>
+                <mrow><mo fence="true">⟨</mo><mi mathvariant="normal">d</mi><mo stretchy="false">(</mo><msubsup><mi mathvariant="normal">T</mi><mi mathvariant="normal">j</mi><mtext>keep</mtext></msubsup><mo>,</mo><msub><mi mathvariant="normal">P</mi><mrow><mi mathvariant="normal">θ</mi><mo>,</mo><mi mathvariant="normal">j</mi></mrow></msub><mo stretchy="false">)</mo><mo fence="true">⟩</mo></mrow>
+                <msup><mi mathvariant="normal">D</mi><mtext>keep</mtext></msup>
+              </msub>
+            </mrow>
+          </math>
+          <figcaption>Recovery objective. The student matches the repair teacher on failed attempts and the keep teacher on solved ones; <i>d</i> is the forward KL over the full vocabulary, with λ<sub>keep</sub> = 1.</figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <!-- HeirCommit -->
+    <section id="heircommit">
+      <div class="sec-head">
+        <h2>HeirCommit cuts harmful commits on every host</h2>
+        <p>We took 64 native updates from each of three self-evolution hosts and scored them on a pool kept apart from the decision probes. HeirCommit commits 23–52% of updates and keeps 78–87% of the useful ones.</p>
+      </div>
+      <div class="fig">
+        <div class="panel">
+          <div class="panel-head">
+            <div>
+              <h3>Every update is one dot</h3>
+              <p class="sub3">The 64 native updates audited on each host. A loop that commits everything inherits every crimson dot.</p>
+            </div>
+            <div class="seg" role="group" aria-label="Inheritance rule">
+              <button type="button" id="dots-all" aria-pressed="true">Commit every update</button>
+              <button type="button" id="dots-hc" aria-pressed="false">HeirCommit</button>
+            </div>
+          </div>
+          <div class="dots-rows" id="dots"></div>
+          <div class="dots-key" aria-hidden="true" style="margin-top:16px">
+            <span><i class="h"></i>update that helps the held-out pool</span>
+            <span><i class="x"></i>update that hurts it</span>
+            <span><i class="o"></i>not inherited</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="fig">
+        <div class="panel">
+          <div class="panel-head">
+            <div>
+              <h3 id="hc-title">Harmful share of commits</h3>
+              <p class="sub3" id="hc-sub">Share of committed updates that hurt the held-out pool. Matched random commits the same fraction at random.</p>
+            </div>
+            <div class="seg" role="group" aria-label="Metric">
+              <button type="button" id="hc-harm" aria-pressed="true">Harmful share</button>
+              <button type="button" id="hc-gain" aria-pressed="false">Pool gain</button>
+            </div>
+          </div>
+          <svg id="chart-hc" viewBox="0 0 680 280" role="img" aria-label="Harmful share of commits by host: R-Zero 76.6% under commit-all versus 13.3% with HeirCommit; Skill-SP 57.8% versus 16.0%; Agent0 46.9% versus 15.2%."></svg>
+        </div>
+        <figcaption>HeirCommit turns negative pool gain positive on R-Zero and Skill-SP and raises Agent0's gain fivefold. It only needs the frozen successor and the root, so any host can apply it to a single native update.</figcaption>
+      </div>
+    </section>
+
+    <!-- Results -->
+    <section id="results">
+      <div class="sec-head">
+        <h2>EvoHeir leads on every backbone</h2>
+        <p>Ten rounds of self-evolution on four backbones, three seeds each. EvoHeir has the highest math and general-reasoning averages on all four and beats Agent0 by 1.59–2.40 pp on the three base models. Of its components, the final confirmation step matters most: removing it costs 2.02 pp.</p>
+      </div>
+
+      <div class="fig">
+        <div class="panel">
+          <div class="panel-head">
+            <div>
+              <h3 id="tbl-title">Math average after ten rounds (%)</h3>
+              <p class="sub3" id="tbl-sub">Seven benchmarks weighted equally. ± is the SD over three seeds.</p>
+            </div>
+            <div class="seg" role="group" aria-label="Benchmark suite">
+              <button type="button" id="tbl-math" aria-pressed="true">Math</button>
+              <button type="button" id="tbl-gen" aria-pressed="false">General</button>
+            </div>
+          </div>
+          <div class="tbl-wrap">
+            <table class="results" id="tbl-results">
+              <thead><tr><th>Backbone</th><th>Base</th><th>R-Zero</th><th>Agent0</th><th>No Recovery</th><th class="ours">EvoHeir</th><th>Over Agent0</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div class="fig">
+        <div class="panel-head">
+          <div class="series-key" aria-hidden="true">
+            <span><i class="k-accent"></i>EvoHeir (Full)</span>
+            <span><i class="k-accent-mid"></i>EvoHeir, no Recovery</span>
+            <span><i class="k-slate"></i>Agent0</span>
+            <span><i class="k-grey"></i>R-Zero</span>
+          </div>
+          <span class="t-note" style="font-size:.84rem;color:var(--muted)">Bands: ±1 SD over 3 seeds for EvoHeir and Agent0</span>
+        </div>
+        <div class="traj-grid" id="traj"></div>
+        <figcaption>Change in math average from round 0 (pp). Each panel has its own y scale. R-Zero peaks between rounds 6 and 8 on three backbones and then slips; EvoHeir ends highest on all four. Hover a panel to read every round.</figcaption>
+      </div>
+
+      <div class="fig">
+        <div class="panel">
+          <h3>Gain over Agent0 on every benchmark</h3>
+          <p class="sub3">EvoHeir minus Agent0 at round 10 (pp, three-seed means). 45 of 48 cells are positive; the three negatives are 30-problem AIME sets.</p>
+          <div class="scroll-x" style="margin-top:14px">
+            <table class="heat" id="heat"></table>
+          </div>
+          <div class="scale"><span>−1</span><span class="ramp" aria-hidden="true"></span><span>+4 pp</span></div>
+        </div>
+      </div>
+    </section>
+
+
+
+    <!-- BibTeX -->
+    <section id="bibtex">
+      <div class="sec-head">
+        <h2>Cite this work</h2>
+      </div>
+      <div class="bib">
+        <button type="button" class="btn" id="copy-bib">Copy</button>
+        <pre id="bib-text">@article{yang2026selection,
+  title   = {Selection Is Not Learning: Choosing Model Futures},
+  author  = {Yang, Haoyi and Mishra, Kshitij and Lukas, Nils and Lahlou, Salem},
+  journal = {arXiv preprint arXiv:2610.22029},
+  year    = {2026}
+}</pre>
+      </div>
+    </section>
+  </div>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>Haoyi Yang, Kshitij Mishra, Nils Lukas, Salem Lahlou. MBZUAI, 2026.</span>
+    <span>All charts are drawn from the numbers reported in the paper.</span>
+  </div>
+</footer>
+
+<div class="tip" id="tip" hidden></div>
+
+<script>
+(function () {
+  "use strict";
+  var NS = "http://www.w3.org/2000/svg";
+  function S(tag, attrs, parent) {
+    var e = document.createElementNS(NS, tag);
+    if (attrs) for (var k in attrs) e.setAttribute(k, attrs[k]);
+    if (parent) parent.appendChild(e);
+    return e;
+  }
+  function T(parent, x, y, str, cls, anchor) {
+    var t = S("text", { x: x, y: y, "class": cls || "t-tick", "text-anchor": anchor || "start" }, parent);
+    t.textContent = str;
+    return t;
+  }
+  function lin(d0, d1, r0, r1) { return function (v) { return r0 + (v - d0) / (d1 - d0) * (r1 - r0); }; }
+  function sgn(v, d) { var s = v.toFixed(d == null ? 2 : d); return (v > 0 ? "+" : v < 0 ? "−" : "") + s.replace("-", ""); }
+  function clear(el) { while (el.firstChild) el.removeChild(el.firstChild); }
+
+  /* Tooltip */
+  var tip = document.getElementById("tip");
+  function showTip(html, ev) {
+    tip.innerHTML = html; tip.hidden = false;
+    var r = tip.getBoundingClientRect(), x = ev.clientX + 14, y = ev.clientY + 14;
+    if (x + r.width > window.innerWidth - 8) x = ev.clientX - r.width - 14;
+    if (y + r.height > window.innerHeight - 8) y = ev.clientY - r.height - 14;
+    tip.style.left = Math.max(8, x) + "px"; tip.style.top = Math.max(8, y) + "px";
+  }
+  function hideTip() { tip.hidden = true; }
+  function hover(el, htmlFn) {
+    el.addEventListener("pointermove", function (ev) { showTip(htmlFn(ev), ev); });
+    el.addEventListener("pointerleave", hideTip);
+  }
+  window.addEventListener("scroll", hideTip, { passive: true });
+
+  /* Segmented controls */
+  function seg(ids, onChange) {
+    ids.forEach(function (id, i) {
+      var b = document.getElementById(id);
+      b.addEventListener("click", function () {
+        ids.forEach(function (o) { document.getElementById(o).setAttribute("aria-pressed", o === id ? "true" : "false"); });
+        onChange(i);
+      });
+    });
+  }
+
+  /* ---------- Hero lineage (illustrative) ---------- */
+  (function lineage() {
+    var svg = document.getElementById("lineage");
+    var yS = 112, yRail = 226, step = 90.4;
+    function xs(i) { return 48 + i * step; }
+    var commit = [null, 1, 1, 1, 0, 0, 1, 1, 0, 1, 1];
+    var pickUp = [null, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0];
+    var gArch = S("g", null, svg), gEdge = S("g", null, svg), gMain = S("g", null, svg), gNode = S("g", null, svg);
+
+    S("line", { x1: 26, x2: 974, y1: yRail, y2: yRail, "class": "ln-rail" }, gArch);
+    var pulse = [["M", xs(0), yS]];
+
+    for (var t = 1; t <= 10; t++) {
+      var x0 = xs(t - 1), x1 = xs(t), xb = x0 + step * 0.42;
+      var ys = [yS - 54, yS + 54];
+      var pick = pickUp[t] ? 0 : 1;
+      var yr = ys[pick];
+      var xp = x1 - step * 0.2, yp = yS + (pick ? 26 : -26);
+
+      ys.forEach(function (yb) {
+        S("path", { d: "M" + x0 + "," + yS + " C" + (x0 + 20) + "," + yS + " " + (xb - 24) + "," + yb + " " + xb + "," + yb, "class": "ln-branch" }, gEdge);
+      });
+      /* every branch drops its qualified experience into the archive */
+      S("path", { d: "M" + (xb - 4) + "," + (ys[1] + 7) + " Q" + (xb - 8) + "," + (yRail - 22) + " " + (xb - 14) + "," + (yRail - 2), "class": "ln-arch" }, gArch);
+      S("path", { d: "M" + (xb + 6) + "," + (ys[0] + 6) + " C" + (xb + 30) + "," + (yS - 20) + " " + (xb + 20) + "," + (yRail - 60) + " " + (xb + 2) + "," + (yRail - 2), "class": "ln-arch" }, gArch);
+      /* later rounds draw archived experience into their recipient */
+      if (t >= 2) S("path", { d: "M" + (xp - 18) + "," + (yRail - 2) + " Q" + (xp - 4) + "," + (yRail - 40) + " " + xp + "," + (yp + (pick ? 8 : 8)), "class": "ln-arch" }, gArch);
+
+      S("path", { d: "M" + xb + "," + yr + " Q" + (xp - 8) + "," + yr + " " + xp + "," + yp, "class": "ln-recv" }, gEdge);
+
+      if (commit[t]) {
+        S("path", { d: "M" + x0 + "," + yS + " L" + xp + "," + yp + " L" + x1 + "," + yS, "class": "ln-commit" }, gMain);
+        pulse.push(["L", xp, yp], ["L", x1, yS]);
+      } else {
+        S("path", { d: "M" + x0 + "," + yS + " L" + x1 + "," + yS, "class": "ln-retain" }, gMain);
+        pulse.push(["L", x1, yS]);
+      }
+
+      S("circle", { cx: xb, cy: ys[0], r: 6, "class": "nd-branch" }, gNode);
+      S("circle", { cx: xb, cy: ys[1], r: 6, "class": "nd-branch" }, gNode);
+      S("circle", { cx: xb, cy: yr, r: 10.5, "class": "nd-pick" }, gNode);
+      if (commit[t]) {
+        S("circle", { cx: xp, cy: yp, r: 5.5, "class": "nd-prop" }, gNode);
+        S("circle", { cx: x1, cy: yS, r: 8, "class": "nd-commit" }, gNode);
+      } else {
+        S("circle", { cx: xp, cy: yp, r: 7, "class": "nd-rej" }, gNode);
+        S("path", { d: "M" + (xp - 3.2) + "," + (yp - 3.2) + " L" + (xp + 3.2) + "," + (yp + 3.2) + " M" + (xp + 3.2) + "," + (yp - 3.2) + " L" + (xp - 3.2) + "," + (yp + 3.2), "class": "x-rej" }, gNode);
+        S("circle", { cx: x1, cy: yS, r: 7, "class": "nd-keep" }, gNode);
+      }
+      T(svg, x1, yRail + 42, String(t), "t-tick", "middle");
+    }
+    S("circle", { cx: xs(0), cy: yS, r: 9, "class": "nd-commit" }, gNode);
+    T(svg, xs(0), yRail + 42, "round 0", "t-tick", "middle");
+    T(svg, 26, yRail + 20, "archive", "t-note t-arch", "start");
+
+    var d = pulse.map(function (p) { return p[0] + p[1] + "," + p[2]; }).join(" ");
+    var pp = S("path", { d: d, "class": "ln-pulse" }, gMain);
+    var len = pp.getTotalLength();
+    pp.style.setProperty("--len", len);
+    pp.setAttribute("stroke-dasharray", "60 " + (len + 60));
+    pp.setAttribute("stroke-dashoffset", len);
+    requestAnimationFrame(function () { pp.classList.add("run"); });
+  })();
+
+  /* ---------- 96 updates sorted by NLL gain ---------- */
+  (function nll() {
+    var v = [-11.5432,-7.3018,-4.8509,-4.5562,-4.5320,-4.3536,-3.9579,-3.8907,-3.7171,-3.6404,-3.6005,-3.5335,-3.4447,-3.4364,-3.0913,-3.0506,-2.7796,-2.7267,-2.7144,-2.6162,-2.5929,-2.5654,-2.4099,-2.2827,-2.2358,-2.2120,-1.9350,-1.9089,-1.8869,-1.8506,-1.7507,-1.6832,-1.6465,-1.6068,-1.4989,-1.4542,-1.4448,-1.4311,-1.4099,-1.3873,-1.3754,-1.3243,-1.2337,-1.1936,-1.1150,-1.0977,-1.0630,-1.0114,-0.9643,-0.8289,-0.8253,-0.8085,-0.7978,-0.7489,-0.7312,-0.7022,-0.6545,-0.6191,-0.5661,-0.2737,
+      0.4420,0.4738,0.5503,0.6141,0.8274,0.8283,0.8461,1.0746,1.1880,1.2930,1.3180,1.3397,1.3581,1.4580,1.5788,1.7627,1.9068,1.9167,2.1615,2.4956,2.5304,2.6064,2.7749,2.9205,2.9627,3.0192,3.0857,3.1729,3.7440,3.7759,4.1728,4.2021,4.7741,6.2629,7.2903,9.4160];
+    var svg = document.getElementById("chart-nll");
+    var W = 640, H = 250, m = { l: 38, r: 8, t: 14, b: 34 };
+    var y = lin(-12, 10, H - m.b, m.t);
+    var bw = (W - m.l - m.r) / v.length;
+    [-10, -5, 0, 5, 10].forEach(function (tk) {
+      S("line", { x1: m.l, x2: W - m.r, y1: y(tk), y2: y(tk), "class": tk === 0 ? "ax-0" : "grid-l" }, svg);
+      T(svg, m.l - 8, y(tk) + 4, tk === 0 ? "0" : sgn(tk, 0), "t-tick", "end");
+    });
+    v.forEach(function (val, i) {
+      var x = m.l + i * bw;
+      var r = S("rect", {
+        x: x + 0.6, width: Math.max(1, bw - 1.2),
+        y: val >= 0 ? y(val) : y(0), height: Math.abs(y(val) - y(0)),
+        rx: 1, "class": (val <= 0 ? "f-harm" : "f-slate") + " bar-hover"
+      }, svg);
+      hover(r, function () { return "<b>Update " + (i + 1) + " of 96</b><br>NLL gain " + sgn(val, 2) + (val <= 0 ? "<br><span style='opacity:.75'>no gain</span>" : ""); });
+    });
+    var mid60 = m.l + 30 * bw, mid36 = m.l + 78 * bw;
+    T(svg, mid60, y(4.2), "60 updates: no gain", "t-lab t-harm", "middle");
+    T(svg, mid36, y(-4.8), "36 with gain", "t-lab", "middle");
+    T(svg, m.l, H - 8, "96 updates, sorted by gain", "t-note", "start");
+  })();
+
+  /* ---------- Selected-target optimism ---------- */
+  (function opt() {
+    var svg = document.getElementById("chart-opt");
+    var W = 400, H = 250, m = { l: 128, r: 54, t: 16, b: 36 };
+    var x = lin(-2, 11, m.l, W - m.r);
+    var rows = [
+      { host: "Agent0", kind: "selected", v: 8.60, lo: 7.35, hi: 9.85 },
+      { host: "Agent0", kind: "control", v: 0.20, lo: -0.82, hi: 1.22 },
+      { host: "R-Zero", kind: "selected", v: 4.10, lo: 2.64, hi: 5.56 },
+      { host: "R-Zero", kind: "control", v: -0.10, lo: -1.24, hi: 1.04 }
+    ];
+    var yRow = function (i) { return m.t + 22 + i * 46 + (i >= 2 ? 12 : 0); };
+    [0, 5, 10].forEach(function (tk) {
+      S("line", { x1: x(tk), x2: x(tk), y1: m.t, y2: H - m.b, "class": tk === 0 ? "ax-0" : "grid-l" }, svg);
+      T(svg, x(tk), H - m.b + 18, tk === 0 ? "0" : "+" + tk, "t-tick", "middle");
+    });
+    T(svg, (m.l + W - m.r) / 2, H - 4, "optimism (pp)", "t-note", "middle");
+    rows.forEach(function (r, i) {
+      var yy = yRow(i), sel = r.kind === "selected";
+      if (i % 2 === 0) T(svg, 0, yy + 4, r.host, "t-lab t-ink", "start");
+      T(svg, m.l - 10, yy + 4, sel ? "selected" : "control", "t-tick", "end");
+      S("line", { x1: x(r.lo), x2: x(r.hi), y1: yy, y2: yy, "class": sel ? "s-harm" : "s-slate", "stroke-width": 2, "stroke-linecap": "round" }, svg);
+      S("circle", { cx: x(r.v), cy: yy, r: 6, "class": (sel ? "f-harm" : "f-slate") + " s-surface", "stroke-width": 2 }, svg);
+      T(svg, x(r.hi) + 8, yy + 4, sgn(r.v, 2), sel ? "t-val t-harm" : "t-val", "start");
+      var hit = S("rect", { x: m.l, y: yy - 18, width: W - m.l - m.r + 50, height: 36, "class": "hit" }, svg);
+      hover(hit, function () { return "<b>" + r.host + ", " + r.kind + "</b><br>" + sgn(r.v, 2) + " pp<br><span style='opacity:.75'>interval " + sgn(r.lo, 2) + " to " + sgn(r.hi, 2) + "</span>"; });
+    });
+  })();
+
+  /* ---------- HeirCommit audit ---------- */
+  (function hc() {
+    var svg = document.getElementById("chart-hc");
+    var hosts = [
+      { name: "R-Zero", harm: [76.56, 13.33], gain: [-23.17, -5.43, 10.19], cov: 23.44, useful: 86.67 },
+      { name: "Skill-SP", harm: [57.81, 16.00], gain: [-3.47, -1.36, 2.49], cov: 39.06, useful: 77.78 },
+      { name: "Agent0", harm: [46.88, 15.15], gain: [2.80, 1.44, 14.35], cov: 51.56, useful: 82.35 }
+    ];
+    var W = 680, H = 280;
+    function draw(mode) {
+      clear(svg);
+      var m = { l: 96, r: 70, t: 30, b: 34 };
+      var groupH = (H - m.t - m.b) / 3;
+      if (mode === 0) {
+        document.getElementById("hc-title").textContent = "Harmful share of commits";
+        document.getElementById("hc-sub").textContent = "Share of committed updates that hurt the held-out pool. Matched random commits the same fraction at random and keeps the native share.";
+        svg.setAttribute("aria-label", "Harmful share of commits by host: R-Zero 76.6% under commit-all versus 13.3% with HeirCommit; Skill-SP 57.8% versus 16.0%; Agent0 46.9% versus 15.2%.");
+        var x = lin(0, 100, m.l, W - m.r);
+        [0, 25, 50, 75, 100].forEach(function (tk) {
+          S("line", { x1: x(tk), x2: x(tk), y1: m.t - 8, y2: H - m.b, "class": tk === 0 ? "ax-0" : "grid-l" }, svg);
+          T(svg, x(tk), H - m.b + 18, tk + "%", "t-tick", "middle");
+        });
+        var series = [{ n: "Commit all / matched random", c: "f-grey" }, { n: "HeirCommit", c: "f-accent" }];
+        hosts.forEach(function (h, gi) {
+          var gy = m.t + gi * groupH;
+          T(svg, 0, gy + groupH / 2 + 4, h.name, "t-lab t-ink", "start");
+          h.harm.forEach(function (val, si) {
+            var by = gy + 10 + si * 26;
+            var r = S("rect", { x: x(0), y: by, width: x(val) - x(0), height: 20, rx: 4, "class": series[si].c + " bar-hover" }, svg);
+            T(svg, x(val) + 8, by + 15, val.toFixed(1) + "%", si === 1 ? "t-val t-acc" : "t-val", "start");
+            hover(r, function () {
+              return "<b>" + h.name + ", " + series[si].n + "</b><br>" + val.toFixed(2) + "% of commits harmful" +
+                (si === 1 ? "<br>commits " + h.cov.toFixed(1) + "% of updates<br>keeps " + h.useful.toFixed(1) + "% of useful ones" : "<br>native loop commits every update");
+            });
+          });
+        });
+        S("rect", { x: m.l, y: 6, width: 12, height: 12, rx: 3, "class": "f-grey" }, svg);
+        T(svg, m.l + 18, 16, "Commit all (and matched random)", "t-lab", "start");
+        S("rect", { x: m.l + 250, y: 6, width: 12, height: 12, rx: 3, "class": "f-accent" }, svg);
+        T(svg, m.l + 268, 16, "HeirCommit", "t-lab", "start");
+      } else {
+        document.getElementById("hc-title").textContent = "Pool-mean NLL gain";
+        document.getElementById("hc-sub").textContent = "Mean held-out gain of the committed set (×10⁻³ NLL). Above zero means the inherited updates help on average.";
+        svg.setAttribute("aria-label", "Pool-mean NLL gain by host. R-Zero: commit-all minus 23.17, matched random minus 5.43, HeirCommit plus 10.19. Skill-SP: minus 3.47, minus 1.36, plus 2.49. Agent0: plus 2.80, plus 1.44, plus 14.35.");
+        var x2 = lin(-25, 16, m.l, W - m.r);
+        [-20, -10, 0, 10].forEach(function (tk) {
+          S("line", { x1: x2(tk), x2: x2(tk), y1: m.t - 8, y2: H - m.b, "class": tk === 0 ? "ax-0" : "grid-l" }, svg);
+          T(svg, x2(tk), H - m.b + 18, tk === 0 ? "0" : sgn(tk, 0), "t-tick", "middle");
+        });
+        var ser = [{ n: "Commit all", c: "f-grey" }, { n: "Matched random", c: "f-slate" }, { n: "HeirCommit", c: "f-accent" }];
+        hosts.forEach(function (h, gi) {
+          var gy = m.t + gi * groupH;
+          T(svg, 0, gy + groupH / 2 + 4, h.name, "t-lab t-ink", "start");
+          h.gain.forEach(function (val, si) {
+            var by = gy + 6 + si * 19;
+            var xa = Math.min(x2(0), x2(val)), w = Math.abs(x2(val) - x2(0));
+            var r = S("rect", { x: xa, y: by, width: Math.max(w, 1.5), height: 15, rx: 3, "class": ser[si].c + " bar-hover" }, svg);
+            var lx = val >= 0 ? x2(val) + 6 : x2(val) - 6;
+            T(svg, lx, by + 12, sgn(val, 2), si === 2 ? "t-val t-acc" : "t-val", val >= 0 ? "start" : "end");
+            hover(r, function () { return "<b>" + h.name + ", " + ser[si].n + "</b><br>" + sgn(val, 2) + " ×10⁻³ NLL"; });
+          });
+        });
+        var lx0 = m.l;
+        ser.forEach(function (s, i) {
+          var off = [0, 120, 270][i];
+          S("rect", { x: lx0 + off, y: 6, width: 12, height: 12, rx: 3, "class": s.c }, svg);
+          T(svg, lx0 + off + 18, 16, s.n, "t-lab", "start");
+        });
+      }
+    }
+    draw(0);
+    seg(["hc-harm", "hc-gain"], draw);
+  })();
+
+  /* ---------- Every update, one dot ----------
+     Counts follow exactly from the audit table: 64 updates per host, coverage,
+     harmful share of commits, and useful updates retained. */
+  (function dots() {
+    var hosts = [
+      { n: "R-Zero", cu: 13, ch: 2, ru: 2, rh: 47 },
+      { n: "Skill-SP", cu: 21, ch: 4, ru: 6, rh: 33 },
+      { n: "Agent0", cu: 28, ch: 5, ru: 6, rh: 25 }
+    ];
+    var COLS = 16, GAP = 20, R = 6.6;
+    var host = document.getElementById("dots");
+    var rows = [];
+    var seed = 7;
+    function rnd() { seed = (seed * 16807) % 2147483647; return seed / 2147483647; }
+    function pos(i) { return [12 + (i % COLS) * GAP, 12 + Math.floor(i / COLS) * GAP]; }
+    hosts.forEach(function (h) {
+      var row = document.createElement("div");
+      row.className = "dots-row";
+      row.innerHTML = "<h4>" + h.n + "</h4>";
+      var svg = S("svg", { viewBox: "0 0 " + (COLS * GAP + 4) + " " + (4 * GAP + 4), role: "img" }, row);
+      var stat = document.createElement("div");
+      stat.className = "dots-stat";
+      row.appendChild(stat);
+      host.appendChild(row);
+      var items = [];
+      [["cu", "help", 1], ["ch", "hurt", 1], ["ru", "help", 0], ["rh", "hurt", 0]].forEach(function (g) {
+        for (var k = 0; k < h[g[0]]; k++) items.push({ kind: g[1], commit: g[2] });
+      });
+      var mixed = items.map(function (it) { return [rnd(), it]; }).sort(function (a, b) { return a[0] - b[0]; }).map(function (p) { return p[1]; });
+      mixed.forEach(function (it, i) { it.mix = i; });
+      var sorted = items.slice().sort(function (a, b) { return (b.commit - a.commit) || (a.kind === "help" ? -1 : 1) - (b.kind === "help" ? -1 : 1); });
+      sorted.forEach(function (it, i) { it.hc = i; });
+      items.forEach(function (it) {
+        it.el = S("circle", { cx: 0, cy: 0, r: R, "class": "dot " + it.kind }, svg);
+        it.el.style.transitionDelay = (it.hc * 9) + "ms";
+      });
+      rows.push({ h: h, svg: svg, stat: stat, items: items });
+    });
+    function draw(mode) {
+      rows.forEach(function (r) {
+        var h = r.h, all = mode === 0;
+        r.items.forEach(function (it) {
+          var p = pos(all ? it.mix : it.hc);
+          it.el.style.transform = "translate(" + p[0] + "px," + p[1] + "px)";
+          it.el.setAttribute("class", "dot " + it.kind + (!all && !it.commit ? " off" : ""));
+        });
+        var committed = all ? 64 : h.cu + h.ch, harmful = all ? h.ch + h.rh : h.ch;
+        var useful = h.cu + h.ru, kept = all ? useful : h.cu;
+        r.stat.innerHTML = "<b class='" + (all ? "" : "good") + "'>" + (harmful / committed * 100).toFixed(1) + "% harmful</b>" +
+          "<span>" + harmful + " of " + committed + " committed updates hurt</span>" +
+          "<span>" + kept + " of " + useful + " useful updates kept</span>";
+        r.svg.setAttribute("aria-label", h.n + ": " + committed + " of 64 updates committed, " + harmful + " of them harmful; " + kept + " of " + useful + " useful updates kept.");
+      });
+    }
+    function set(mode) {
+      document.getElementById("dots-all").setAttribute("aria-pressed", mode === 0 ? "true" : "false");
+      document.getElementById("dots-hc").setAttribute("aria-pressed", mode === 1 ? "true" : "false");
+      draw(mode);
+    }
+    seg(["dots-all", "dots-hc"], draw);
+    var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (reduce || !("IntersectionObserver" in window)) { set(1); return; }
+    set(0);
+    var played = false;
+    var io = new IntersectionObserver(function (es) {
+      es.forEach(function (e) {
+        if (e.isIntersecting && !played) { played = true; io.disconnect(); setTimeout(function () { set(1); }, 700); }
+      });
+    }, { threshold: 0.5 });
+    io.observe(host);
+  })();
+
+  /* ---------- Main results table ---------- */
+  (function table() {
+    var rows = [
+      { b: "Qwen3-4B-Base", m: [25.81, [28.79, .65], [30.01, .57], [30.29, .40], [31.82, .55]], rel: 6.0, g: [27.00, 28.82, 29.51, 29.82, 30.52] },
+      { b: "Qwen3-8B-Base", m: [28.06, [32.65, .65], [34.11, .63], [34.35, .38], [36.51, .67]], rel: 7.0, g: [32.34, 33.84, 35.24, 35.75, 36.48] },
+      { b: "OLMo-3-7B", m: [19.92, [21.73, .61], [23.35, .44], [23.50, .56], [24.94, .48]], rel: 6.8, g: [18.05, 18.66, 20.05, 20.34, 21.40] },
+      { b: "Gemma-4-E4B-it", m: [43.77, [45.11, .50], [46.66, .59], [46.53, .42], [47.21, .44]], rel: 1.2, g: [38.88, 39.01, 40.37, 40.73, 40.93] }
+    ];
+    var tb = document.querySelector("#tbl-results tbody");
+    function cell(v) {
+      if (Array.isArray(v)) return v[0].toFixed(2) + '<span class="pm">±' + v[1].toFixed(2) + "</span>";
+      return v.toFixed(2);
+    }
+    function draw(mode) {
+      document.getElementById("tbl-title").textContent = mode === 0 ? "Math average after ten rounds (%)" : "General-reasoning average after ten rounds (%)";
+      document.getElementById("tbl-sub").textContent = mode === 0 ? "Seven benchmarks weighted equally. ± is the SD over three seeds." : "SuperGPQA, MMLU-Pro, BBEH, LiveBench Reasoning, and KOR-Bench, weighted equally.";
+      tb.innerHTML = rows.map(function (r) {
+        var v = mode === 0 ? r.m : r.g;
+        var ours = Array.isArray(v[4]) ? v[4][0] : v[4];
+        var a0 = Array.isArray(v[2]) ? v[2][0] : v[2];
+        var diff = ours - a0;
+        var gain = '+' + diff.toFixed(2) + " pp" + (mode === 0 ? "<small>+" + r.rel.toFixed(1) + "%</small>" : "");
+        return "<tr><td>" + r.b + "</td><td>" + cell(v[0]) + "</td><td>" + cell(v[1]) + "</td><td>" + cell(v[2]) + "</td><td>" + cell(v[3]) +
+          '</td><td class="ours">' + cell(v[4]) + '</td><td class="gain">' + gain + "</td></tr>";
+      }).join("");
+    }
+    draw(0);
+    seg(["tbl-math", "tbl-gen"], draw);
+  })();
+
+  /* ---------- Ten-round trajectories ---------- */
+  (function traj() {
+    var DATA = {"Qwen3-4B":{"rzero":{"mean":[0.0,0.3,0.98,1.93,2.78,3.29,3.77,3.96,3.63,3.21,2.98],"sd":[0.0,0.51,0.88,1.16,1.21,1.66,1.4,1.44,1.39,1.07,0.65]},"agent0":{"mean":[0.0,0.64,1.37,2.08,2.78,3.27,3.7,3.92,4.02,4.02,4.2],"sd":[0.0,0.21,0.4,0.32,0.44,0.41,0.45,0.71,1.2,0.88,0.57]},"norec":{"mean":[0.0,1.08,1.83,2.46,3.01,3.54,3.97,4.25,4.54,4.52,4.48],"sd":[0.0,0.57,0.31,0.26,0.41,0.08,0.37,0.16,0.67,0.53,0.4]},"evoheir":{"mean":[0.0,0.61,0.99,2.12,2.91,3.42,4.61,5.11,5.47,5.89,6.01],"sd":[0.0,0.33,0.61,0.76,0.59,0.15,0.33,0.77,0.9,0.76,0.55]}},"Qwen3-8B":{"rzero":{"mean":[0.0,0.7,1.13,1.59,2.06,2.56,3.45,4.03,4.27,4.21,4.59],"sd":[0.0,0.92,1.31,1.21,1.3,1.57,1.42,1.26,0.96,0.11,0.65]},"agent0":{"mean":[0.0,1.03,2.07,2.67,3.27,3.9,4.56,4.94,5.19,5.88,6.05],"sd":[0.0,0.32,0.39,0.39,0.4,0.56,0.76,0.93,1.22,0.64,0.63]},"norec":{"mean":[0.0,0.85,1.52,2.02,2.7,3.26,4.12,4.71,5.05,5.52,6.29],"sd":[0.0,0.19,0.64,0.89,1.07,0.58,0.39,0.65,0.44,0.24,0.38]},"evoheir":{"mean":[0.0,1.1,2.1,2.72,3.45,4.22,5.1,6.44,7.13,8.12,8.45],"sd":[0.0,0.84,1.3,0.86,0.92,1.6,1.61,1.96,1.36,1.08,0.67]}},"OLMo-3-7B":{"rzero":{"mean":[0.0,0.3,0.83,1.15,1.54,2.21,2.75,2.51,2.61,2.51,1.81],"sd":[0.0,0.11,0.18,0.36,0.52,0.41,0.51,0.4,0.68,0.92,0.61]},"agent0":{"mean":[0.0,0.19,0.5,1.24,1.67,1.88,2.02,1.94,1.95,2.7,3.43],"sd":[0.0,0.31,0.49,0.3,0.24,0.41,0.71,0.95,0.81,0.49,0.44]},"norec":{"mean":[0.0,0.69,1.12,1.44,1.88,2.4,3.1,3.31,3.47,3.57,3.58],"sd":[0.0,0.32,0.15,0.39,0.73,0.28,0.35,0.44,0.21,0.2,0.56]},"evoheir":{"mean":[0.0,0.57,0.86,1.39,1.92,2.87,3.46,3.92,4.44,4.56,5.02],"sd":[0.0,0.26,0.04,0.49,0.59,0.75,0.38,0.33,0.42,0.34,0.48]}},"Gemma-4-E4B-it":{"rzero":{"mean":[0.0,0.14,0.52,0.84,0.96,1.42,1.9,2.23,2.37,2.08,1.34],"sd":[0.0,0.38,0.67,0.92,0.81,0.74,0.62,0.38,0.16,0.31,0.5]},"agent0":{"mean":[0.0,0.38,0.75,1.16,1.39,1.75,1.97,2.18,2.56,2.88,2.89],"sd":[0.0,0.24,0.35,0.35,0.19,0.23,0.36,0.25,0.28,0.49,0.59]},"norec":{"mean":[0.0,0.77,1.18,1.43,1.7,2.1,2.52,2.71,2.92,2.95,2.76],"sd":[0.0,0.2,0.57,0.36,0.63,0.99,0.61,0.72,0.41,0.47,0.42]},"evoheir":{"mean":[0.0,0.81,1.28,1.66,1.98,2.59,2.76,2.94,3.02,3.28,3.44],"sd":[0.0,0.37,0.16,0.5,0.49,0.5,0.62,0.31,0.42,0.6,0.44]}}};
+    var NAMES = { "Qwen3-4B": "Qwen3-4B-Base", "Qwen3-8B": "Qwen3-8B-Base", "OLMo-3-7B": "OLMo-3-7B", "Gemma-4-E4B-it": "Gemma-4-E4B-it" };
+    var SER = [
+      { k: "rzero", n: "R-Zero", c: "grey", dash: "5 4", w: 2 },
+      { k: "agent0", n: "Agent0", c: "slate", w: 2, band: true },
+      { k: "norec", n: "No Recovery", c: "accent-mid", w: 2 },
+      { k: "evoheir", n: "EvoHeir", c: "accent", w: 3, band: true }
+    ];
+    var host = document.getElementById("traj");
+    Object.keys(DATA).forEach(function (key) {
+      var d = DATA[key];
+      var lead = d.evoheir.mean[10] - d.agent0.mean[10];
+      var panel = document.createElement("div");
+      panel.className = "panel";
+      panel.innerHTML = "<h3>" + NAMES[key] + '</h3><p class="lead">+' + lead.toFixed(2) + " pp over Agent0 at round 10</p>";
+      host.appendChild(panel);
+      var W = 300, H = 232, m = { l: 30, r: 40, t: 12, b: 40 };
+      var svg = S("svg", { viewBox: "0 0 " + W + " " + H, role: "img", "aria-label": NAMES[key] + ": EvoHeir ends at +" + d.evoheir.mean[10].toFixed(2) + " pp, Agent0 at +" + d.agent0.mean[10].toFixed(2) + ", No Recovery at +" + d.norec.mean[10].toFixed(2) + ", R-Zero at +" + d.rzero.mean[10].toFixed(2) + "." }, panel);
+      var hi = 0;
+      SER.forEach(function (s) { d[s.k].mean.forEach(function (v, i) { hi = Math.max(hi, v + (s.band ? d[s.k].sd[i] : 0)); }); });
+      var stepY = hi > 7 ? 2 : hi > 4.5 ? 2 : 1;
+      var top = Math.ceil(hi / stepY) * stepY;
+      var x = lin(0, 10, m.l, W - m.r), y = lin(0, top, H - m.b, m.t);
+      for (var tk = 0; tk <= top; tk += stepY) {
+        S("line", { x1: m.l, x2: W - m.r, y1: y(tk), y2: y(tk), "class": tk === 0 ? "ax" : "grid-l" }, svg);
+        T(svg, m.l - 7, y(tk) + 4, tk === 0 ? "0" : "+" + tk, "t-tick", "end");
+      }
+      [0, 2, 4, 6, 8, 10].forEach(function (r) { T(svg, x(r), H - m.b + 17, r === 0 ? "0" : String(r), "t-tick", "middle"); });
+      T(svg, (m.l + W - m.r) / 2, H - 4, "round", "t-note", "middle");
+
+      SER.forEach(function (s) {
+        if (!s.band) return;
+        var up = d[s.k].mean.map(function (v, i) { return [x(i), y(v + d[s.k].sd[i])]; });
+        var lo = d[s.k].mean.map(function (v, i) { return [x(i), y(v - d[s.k].sd[i])]; }).reverse();
+        S("path", { d: "M" + up.concat(lo).map(function (p) { return p[0].toFixed(1) + "," + p[1].toFixed(1); }).join("L") + "Z", "class": "f-" + s.c + " band" }, svg);
+      });
+      SER.forEach(function (s) {
+        var pts = d[s.k].mean.map(function (v, i) { return x(i).toFixed(1) + "," + y(v).toFixed(1); });
+        var attrs = { d: "M" + pts.join("L"), "class": "line s-" + s.c, "stroke-width": s.w };
+        if (s.dash) attrs["stroke-dasharray"] = s.dash;
+        S("path", attrs, svg);
+      });
+      /* lead bracket at round 10 */
+      var xe = x(10) + 9, ya = y(d.agent0.mean[10]), ye = y(d.evoheir.mean[10]);
+      S("path", { d: "M" + (xe - 3) + "," + ye + "H" + xe + "V" + ya + "H" + (xe - 3), "class": "s-accent", fill: "none", "stroke-width": 1.5 }, svg);
+      T(svg, xe + 4, (ya + ye) / 2 + 4, "+" + lead.toFixed(1), "t-val t-acc", "start");
+      S("circle", { cx: x(10), cy: ye, r: 4, "class": "f-accent s-surface", "stroke-width": 1.5 }, svg);
+
+      var cross = S("line", { x1: 0, x2: 0, y1: m.t, y2: H - m.b, "class": "ax-0", "stroke-dasharray": "3 3", visibility: "hidden" }, svg);
+      var dots = SER.map(function (s) { return S("circle", { r: 3.6, "class": "f-" + s.c + " s-surface", "stroke-width": 1.5, visibility: "hidden" }, svg); });
+      var hit = S("rect", { x: m.l, y: m.t, width: W - m.l - m.r, height: H - m.t - m.b, "class": "hit" }, svg);
+      hit.addEventListener("pointermove", function (ev) {
+        var bb = svg.getBoundingClientRect();
+        var px = (ev.clientX - bb.left) / bb.width * W;
+        var r = Math.max(0, Math.min(10, Math.round((px - m.l) / (W - m.l - m.r) * 10)));
+        cross.setAttribute("x1", x(r)); cross.setAttribute("x2", x(r)); cross.setAttribute("visibility", "visible");
+        SER.forEach(function (s, i) { dots[i].setAttribute("cx", x(r)); dots[i].setAttribute("cy", y(d[s.k].mean[r])); dots[i].setAttribute("visibility", "visible"); });
+        var html = "<b>" + NAMES[key] + ", round " + r + "</b>" + SER.slice().reverse().map(function (s) {
+          var v = d[s.k].mean[r], sd = d[s.k].sd[r];
+          return '<div class="row"><span class="sw sw-' + s.c + '"></span><span>' + s.n + "</span><span>" + sgn(v, 2) + (r > 0 ? " ±" + sd.toFixed(2) : "") + "</span></div>";
+        }).join("");
+        showTip(html, ev);
+      });
+      hit.addEventListener("pointerleave", function () {
+        hideTip(); cross.setAttribute("visibility", "hidden");
+        dots.forEach(function (dd) { dd.setAttribute("visibility", "hidden"); });
+      });
+    });
+  })();
+
+  /* ---------- Per-benchmark heatmap ---------- */
+  (function heat() {
+    var cols = ["MATH-500", "Minerva", "Olympiad­Bench", "Omni-MATH-2", "MATH-Beyond", "AIME 2025", "AIME 2026", "Math Avg.", "SuperGPQA", "MMLU-Pro", "BBEH", "LiveBench", "KOR-Bench", "General Avg."];
+    var rows = [
+      ["Qwen3-4B-Base", [3.67, 4.29, 3.68, 0.49, 0.23, 0.56, -0.28, 1.81, 0.40, 1.37, 1.22, 1.46, 0.56, 1.01]],
+      ["Qwen3-8B-Base", [3.66, 4.07, 2.60, 3.05, 1.55, 0.38, 1.49, 2.40, 0.81, 0.79, 1.40, 1.72, 1.49, 1.24]],
+      ["OLMo-3-7B", [2.60, 3.36, 2.36, 2.57, 0.89, -0.73, 0.04, 1.59, 1.04, 2.65, 0.80, 1.12, 1.12, 1.35]],
+      ["Gemma-4-E4B-it", [0.54, 0.84, 1.30, 1.36, 0.56, -0.77, 0.04, 0.55, 1.09, 1.10, 0.17, 0.43, 0.03, 0.56]]
+    ];
+    var t = document.getElementById("heat");
+    var h = '<thead><tr><th></th><th class="grp" colspan="8">Mathematical reasoning</th><th class="gap"></th><th class="grp" colspan="6">General reasoning</th></tr><tr><th></th>';
+    cols.forEach(function (c, i) { if (i === 8) h += '<th class="gap"></th>'; h += "<th>" + c + "</th>"; });
+    h += "</tr></thead><tbody>";
+    rows.forEach(function (r) {
+      h += '<tr><th class="row" scope="row">' + r[0] + "</th>";
+      r[1].forEach(function (v, i) {
+        if (i === 8) h += '<td class="gap"></td>';
+        var p = Math.min(1, Math.abs(v) / 4.3);
+        var pct = Math.round(8 + p * 82);
+        var base = v < 0 ? "var(--harm)" : "var(--accent)";
+        var bg = "color-mix(in oklab, " + base + " " + pct + "%, var(--surface))";
+        var fg = pct > 55 ? "var(--on-accent)" : "var(--ink)";
+        var avg = (i === 7 || i === 13) ? " avg" : "";
+        h += '<td class="num' + avg + '" style="background:' + bg + ";color:" + fg + '" data-b="' + r[0] + '" data-c="' + cols[i].replace("­", "") + '" data-v="' + v + '">' + sgn(v, 2) + "</td>";
+      });
+      h += "</tr>";
+    });
+    t.innerHTML = h + "</tbody>";
+    t.querySelectorAll("td[data-v]").forEach(function (td) {
+      hover(td, function () { var v = parseFloat(td.dataset.v); return "<b>" + td.dataset.b + "</b><br>" + td.dataset.c + ": " + sgn(v, 2) + " pp over Agent0"; });
+    });
+  })();
+
+
+  /* ---------- Copy BibTeX ---------- */
+  (function bib() {
+    var btn = document.getElementById("copy-bib"), pre = document.getElementById("bib-text");
+    btn.addEventListener("click", function () {
+      function selectIt() {
+        var r = document.createRange(); r.selectNodeContents(pre);
+        var s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
+        btn.textContent = "Selected, press Ctrl+C";
+      }
+      try {
+        navigator.clipboard.writeText(pre.textContent).then(function () {
+          btn.textContent = "Copied";
+          setTimeout(function () { btn.textContent = "Copy"; }, 1800);
+        }, selectIt);
+      } catch (e) { selectIt(); }
+    });
+  })();
+})();
+</script>
+</body>
+</html>
